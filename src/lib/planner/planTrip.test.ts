@@ -33,6 +33,11 @@ describe("planTrip", () => {
     });
 
     expect(itinerary.legs.length).toBeGreaterThan(0);
-    expect(itinerary.usedRouteNames[0]?.length).toBeGreaterThan(0);
+    expect(itinerary.usedRouteNames).toContain("ミニバス２コース（パープルコース）");
+    expect(itinerary.usedRouteNames.every((name) => !name.startsWith("Route "))).toBe(true);
+    itinerary.legs.forEach((leg) => {
+      expect(leg.fromStopId.length).toBeGreaterThan(0);
+      expect(leg.toStopId.length).toBeGreaterThan(0);
+    });
   });
 });

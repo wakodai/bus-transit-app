@@ -61,7 +61,9 @@ function ItineraryView({ itinerary }: { itinerary: Itinerary | null }) {
               className="rounded-xl border border-emerald-100 bg-white px-3 py-2 shadow-sm"
             >
               <div className="flex items-center justify-between text-xs text-emerald-700">
-                <span className="font-semibold">{leg.routeName}</span>
+                <span className="font-semibold" data-testid="itinerary-route">
+                  {leg.routeName}
+                </span>
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
                   乗車
                 </span>
@@ -193,6 +195,34 @@ export default function Home() {
     [fromStop, viaStop, toStop],
   );
 
+  const highlightSegments = useMemo(() => {
+    if (!itinerary) return [];
+    return itinerary.legs
+      .filter((leg) => leg.kind === "vehicle")
+      .map((leg) => ({
+        routeName: leg.routeName,
+        from: {
+          lat: leg.fromLat,
+          lon: leg.fromLon,
+        },
+        to: {
+          lat: leg.toLat,
+          lon: leg.toLon,
+        },
+      }))
+      .filter(
+        (seg) =>
+          typeof seg.from.lat === "number" &&
+          typeof seg.from.lon === "number" &&
+          typeof seg.to.lat === "number" &&
+          typeof seg.to.lon === "number",
+      ) as Array<{
+        routeName: string;
+        from: { lat: number; lon: number };
+        to: { lat: number; lon: number };
+      }>;
+  }, [itinerary]);
+
   const applySelection = (stop: Stop, target?: SelectionMode) => {
     const mode = target ?? selectionMode;
     setError(null);
@@ -311,6 +341,7 @@ export default function Home() {
               selectionMode={selectionMode}
               selectedStopIds={selectedStopIds}
               usedRouteNames={usedRouteNames}
+              highlightSegments={highlightSegments}
               onMapClick={handleMapPick}
               onStopClick={handleStopClick}
             />
