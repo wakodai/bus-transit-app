@@ -17,6 +17,7 @@ PLANS.md file is checked into this repo at `.agent/PLANS.md`. This ExecPlan must
 - [x] (2026-01-12 09:14Z) Playwright スクリプトで再確認し、ハイライト対象のポリラインが高不透明・非破線で描画されることとスクリーンショット（`artifacts/highlight-check-after.png`）を取得した。
 - [x] (2026-01-12 09:16Z) `pnpm lint` / `pnpm test` / `pnpm build` を通した。
 - [x] (2026-01-12 09:17Z) Outcomes & Retrospective を更新した。
+- [x] (2026-01-12 10:47Z) 旅程の各レグに緯度経度を付与し、GeoJSON の該当路線を切り出して道路形状に沿ったハイライトを描画。不透明度は基礎ルート 0.7、強調ルート 0.9 に設定し、スクリーンショット（`artifacts/highlight-follow-route-sliced.png`）を取得した。
 
 ## Surprises & Discoveries
 
@@ -24,16 +25,21 @@ PLANS.md file is checked into this repo at `.agent/PLANS.md`. This ExecPlan must
   Evidence: `node -e "import {readFileSync} from 'fs'; import {Timetable} from 'minotor'; const t=Timetable.fromData(new Uint8Array(readFileSync('public/gtfs/timetable.bin'))); console.log(t.serviceRoutes.slice(0,5));"` で `{ type: 'BUS', name: '', ... }` を確認。Playwright チェック `pnpm tsx scripts/playwright-highlight-check.ts` の出力が `highlightedPaths: 0`。
 - Observation: Playwright で取得した Leaflet の `stroke-width` は HiDPI 環境で半分にスケーリングされるため、ハイライト判定は破線解除と不透明度で見る方が確実。
   Evidence: `pathsSummary` に `dashValues: ["6 6",""]` と `highlightedLike: 2` が出力され、破線解除された 2 本のポリラインがハイライトとして描画されていることを確認。
+- Observation: 旅程の経路を GeoJSON 上で強調する際、出発・到着点に最も近い頂点でスライスすることで直線化を避け、実際の道路形状に沿ったハイライトを描ける。
+  Evidence: `routes.geojson` の `MultiLineString` を最近傍インデックスで切り出し、`artifacts/highlight-follow-route-sliced.png` で曲線沿いの強調が確認できた。
 
 ## Decision Log
 
 - Decision: GTFS 前処理で `route_short_name` が空の場合は `route_long_name` を埋めて minotor に渡し、旅程の路線名を欠損させない。
   Rationale: 知立市ミニバスの GTFS は `route_short_name` が空で、minotor が空文字列のサービス名を生成するため。空文字を防ぎ、GeoJSON の `route_name` と一致させてハイライトできるようにする。
   Date/Author: 2026-01-12 / Codex
+- Decision: ハイライトは GeoJSON 路線の該当区間を切り出して描画し、基礎ルートは不透明度 0.7・細線、検索結果ルートは同色で不透明度 0.9・太線にする。
+  Rationale: 出発地と目的地を直線で結ぶのではなく、実際の道路形状に沿って強調しつつ、全体の視認性を確保するため。
+  Date/Author: 2026-01-12 / Codex
 
 ## Outcomes & Retrospective
 
-GTFS 前処理に路線名の補完を追加し、minotor の ServiceRoute 名が空にならないようにした。`pnpm gtfs:sync` で生成した `timetable.bin` から `usedRouteNames` に実際の路線名が入ることをテストで保証し、Playwright スクリプトで画面を開いて検索したところ、利用路線のポリラインが破線解除・高不透明でハイライトされることを確認できた。lint/test/build も成功し、ハイライト欠如の原因は解消した。
+GTFS 前処理に路線名の補完を追加し、minotor の ServiceRoute 名が空にならないようにした。`pnpm gtfs:sync` で生成した `timetable.bin` から `usedRouteNames` に実際の路線名が入ることをテストで保証し、Playwright で検索を実行したところ、利用路線のポリラインが路線形状に沿って強調表示されることを確認できた。基礎ルートは不透明度 0.7 の細線、検索結果ルートは同色で不透明度 0.9 の太線に統一し、`artifacts/highlight-follow-route-sliced.png` を取得済み。lint/test/build も成功し、視認性要件を満たした。
 
 ## Context and Orientation
 
@@ -75,6 +81,7 @@ GTFS 補完は idempotent に行い、`pnpm gtfs:sync` を再実行すれば常�
 
 - Playwright チェック（修正前）: `pnpm tsx scripts/playwright-highlight-check.ts` → `artifacts/highlight-check.png`、`pathsSummary.highlightedLike: 0`。
 - Playwright チェック（修正後）: `SCREENSHOT_PATH=artifacts/highlight-check-after.png pnpm tsx scripts/playwright-highlight-check.ts` → `pathsSummary.highlightedLike: 2`（破線解除・高不透明な路線が描画される）。
+- Playwright チェック（経路沿い強調後）: `pnpm tsx scripts/playwright-highlight-check.ts` + `artifacts/highlight-follow-route-sliced.png` で、検索結果ルートが路線形状に沿って太線（0.9）で描画されることを確認。
 
 ## Interfaces and Dependencies
 
