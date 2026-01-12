@@ -133,15 +133,15 @@ export function TransitMap({
         <MapClickCatcher onClick={onMapClick} />
         {routes.map((route) =>
           route.segments.map((segment, idx) => {
-            const highlighted = highlightedRoutes.has(route.routeName);
             return (
               <Polyline
-                key={`${route.routeName}-${idx}`}
+                key={`${route.routeName}-${idx}-base`}
                 positions={segment}
                 color={route.color}
-                opacity={highlighted ? 0.9 : 0.25}
-                weight={highlighted ? 6 : 3}
-                dashArray={highlighted ? undefined : "6 6"}
+                opacity={1}
+                weight={3}
+                lineCap="round"
+                lineJoin="round"
               />
             );
           }),

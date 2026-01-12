@@ -61,7 +61,9 @@ function ItineraryView({ itinerary }: { itinerary: Itinerary | null }) {
               className="rounded-xl border border-emerald-100 bg-white px-3 py-2 shadow-sm"
             >
               <div className="flex items-center justify-between text-xs text-emerald-700">
-                <span className="font-semibold">{leg.routeName}</span>
+                <span className="font-semibold" data-testid="itinerary-route">
+                  {leg.routeName}
+                </span>
                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
                   乗車
                 </span>

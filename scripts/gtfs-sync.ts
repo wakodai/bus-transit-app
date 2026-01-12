@@ -1,12 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { GtfsParser } from "minotor/parser";
 import { fetchChiryuMiniBusFile } from "../src/lib/gtfsDataRepository.js";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = path.join(ROOT_DIR, "data", "gtfs");
 const PUBLIC_GTFS_DIR = path.join(ROOT_DIR, "public", "gtfs");
+const execFileAsync = promisify(execFile);
 
 type DownloadTarget = {
   url: string;
@@ -51,6 +54,49 @@ async function downloadFiles(targets: DownloadTarget[]) {
   }
 }
 
+async function patchRouteShortNames(feedZipPath: string) {
+  const { stdout } = await execFileAsync("unzip", ["-p", feedZipPath, "routes.txt"]);
+  const original = stdout as string;
+  const lines = original.split(/\r?\n/).filter((line) => line.length > 0);
+  const header = lines.shift();
+  if (!header) {
+    throw new Error("routes.txt is empty; cannot patch route_short_name");
+  }
+  const columns = header.split(",");
+  const shortIdx = columns.indexOf("route_short_name");
+  const longIdx = columns.indexOf("route_long_name");
+  if (shortIdx === -1 || longIdx === -1) {
+    console.warn("routes.txt missing route_short_name or route_long_name; skipping patch");
+    return;
+  }
+
+  let patchedCount = 0;
+  const patchedRows = lines.map((line) => {
+    const cells = line.split(",");
+    const shortName = (cells[shortIdx] ?? "").trim();
+    const longName = (cells[longIdx] ?? "").trim();
+    if (!shortName && longName) {
+      cells[shortIdx] = longName;
+      patchedCount += 1;
+    }
+    return cells.join(",");
+  });
+
+  if (patchedCount === 0) {
+    console.log("routes.txt: route_short_name already populated; no patch applied.");
+    return;
+  }
+
+  const patchedContent = [header, ...patchedRows].join("\n");
+  const tmpRoutesPath = path.join(DATA_DIR, "routes.txt");
+  await writeFile(tmpRoutesPath, patchedContent);
+  await execFileAsync("zip", ["-j", feedZipPath, tmpRoutesPath]);
+  await rm(tmpRoutesPath);
+  console.log(
+    `Patched ${patchedCount} empty route_short_name entries using route_long_name in ${path.basename(feedZipPath)}`,
+  );
+}
+
 async function main() {
   console.log("Fetching GTFS metadata for org_id=chiryucity...");
   const meta = await fetchChiryuMiniBusFile();
@@ -86,6 +132,7 @@ async function main() {
     },
   ]);
 
+  await patchRouteShortNames(feedZipPath);
   console.log("Parsing GTFS with minotor...");
   const parser = new GtfsParser(feedZipPath);
   const timetable = await parser.parseTimetable(serviceDate);
