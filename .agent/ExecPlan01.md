@@ -14,11 +14,11 @@ PLANS.md file is checked into this repo at `.agent/PLANS.md`. This ExecPlan must
 
 - [x] (2026-01-12 06:29Z) ExecPlan を新規作成した。
 - [x] (2026-01-12 06:29Z) devcontainer の雛形を追加した（Node.js 20 / docker-in-docker / CODEX_HOME）。
-- [ ] Next.js（TypeScript）SPA の雛形を作成する（UI とテストの土台）。
-- [ ] GTFS-JP データ取得と前処理（ルート/停留所 GeoJSON、Minotor 用バイナリ）を自動化する。
-- [ ] 地図 UI（路線色分け、地点選択、結果描画）を実装する。
-- [ ] 乗り換え検索（経由地と滞在時間を含む）を実装する。
-- [ ] 受け入れ条件（E2E/ユニット、lint/test/build）を満たすテストを実装し、全てパスさせる。
+- [x] (2026-01-12 07:03Z) Next.js（TypeScript）SPA の雛形を作成した（Tailwind v4 / Vitest + Testing Library を導入し、`pnpm lint` / `pnpm test` / `pnpm build` を通した）。
+- [x] (2026-01-12 07:14Z) GTFS-JP データ取得と前処理（stops/routes GeoJSON と minotor 用 bin）を `pnpm gtfs:sync` で自動化し、実データで動作確認した。
+- [x] (2026-01-12 07:38Z) 地図 UI（路線色分け、地点選択、結果描画）を実装した。
+- [x] (2026-01-12 07:39Z) 乗り換え検索（経由地と滞在時間を含む）を実装した。
+- [x] (2026-01-12 07:40Z) 受け入れ条件（E2E/ユニット、lint/test/build）を満たすテストを実装し、全てパスさせた。
 
 ## Surprises & Discoveries
 
@@ -28,6 +28,20 @@ PLANS.md file is checked into this repo at `.agent/PLANS.md`. This ExecPlan must
   Evidence: `https://api.gtfs-data.jp/v2/organizations/chiryucity/feeds/communitybus/files/routes.geojson?uid=57c9a2a5-dc52-4fc8-b3e4-49a1cbcaf256` の `properties` は `{ id, route_name }` のみ。
 - Observation: 乗り換え検索ライブラリとして TypeScript/ブラウザ対応の `minotor`（MIT）があり、クライアントサイド実行に向いている。一方で、類似の RAPTOR 実装 `raptor-journey-planner` は GPLv3 で、アプリ全体のライセンス影響が大きい。
   Evidence: `aubryio/minotor` は `LICENSE` が MIT。`planarnetwork/raptor` は `README.md` に GPLv3 と明記されている。
+- Observation: `create-next-app` は空でないディレクトリに対しては失敗するため、テンポラリディレクトリで生成してからルートへ同期する必要があった。
+  Evidence: `The directory bus-transit-app contains files that could conflict: .agent/ ... Either try using a new directory name, or remove the files listed above.` というエラーが出た。
+- Observation: Vitest で `@vitejs/plugin-react` を使う場合、`package.json` を ESM (`"type": "module"`) にしないと `ESM file cannot be loaded by require` で落ちる。
+  Evidence: `@vitejs/plugin-react" resolved to an ESM file. ESM file cannot be loaded by require.` というエラーメッセージを受け、`"type": "module"` を追加したところ解消した。
+- Observation: GTFS メタデータの有効期間は `file_from_date=2025-12-23` から `file_to_date=2026-12-31` までで、`pnpm gtfs:sync` ではこの範囲に今日の日付をクランプして minotor で解析する必要があった。
+  Evidence: メタデータレスポンスの `file_from_date`/`file_to_date` を参照し、`Using service date 2026-01-12 (today; valid 2025-12-23..2026-12-31)` とログ出力されるように実装し、minotor が 106 stops / 10 routes を解析したログを得た。
+- Observation: ESLint flat config では `/* eslint-env */` コメントが非推奨となり警告になるため、gtfs:sync スクリプトではコメントを撤去してもコンソール使用で警告が出ない構成だった。
+  Evidence: `ESLintEnvWarning: /* eslint-env */ comments are no longer recognized ... Found in scripts/gtfs-sync.ts` という警告が出たためコメントを削除し、警告が解消した。
+- Observation: `minotor` の公開エントリは `minotor` と `minotor/parser` に限られ、`minotor/router` サブパスは Node から解決できなかった。
+  Evidence: tsx 実行時に `ERR_PACKAGE_PATH_NOT_EXPORTED` が発生し、インポートをルートエントリに切り替えたところ解消した。
+- Observation: Leaflet はモジュール評価時に `window` を参照するため、Next.js のビルドで SSR 評価されると `window is not defined` で落ちる。
+  Evidence: `next build` のプリレンダーで `ReferenceError: window is not defined` が出たため、React Leaflet コンポーネントを `dynamic(..., { ssr: false })` で遅延読み込みしたところビルドが通った。
+- Observation: minotor の `Route` には空文字の `route.name` が含まれるケースがあり、UI 表示にはフォールバックのラベルが必要だった。
+  Evidence: 実データで `usedRouteNames` が空文字になったため、`Route ${type}` 形式の代替名を埋める実装を追加した。
 
 ## Decision Log
 
@@ -43,14 +57,33 @@ PLANS.md file is checked into this repo at `.agent/PLANS.md`. This ExecPlan must
 - Decision: Supabase/PostgreSQL は「将来の永続化・更新・複数日のデータ管理」の拡張点として設計に織り込むが、最初のマイルストンでは必須にしない。
   Rationale: まずはローカルで全機能を動かすことを優先し、外部 DB のセットアップやマイグレーションで詰まるリスクを下げる。クライアントサイドの前処理+静的配信で要件を満たせるため。
   Date/Author: 2026-01-12 / Codex
+- Decision: ユニットテスト基盤は Vitest + React Testing Library + jest-dom（jsdom 環境）を採用し、`pnpm test` で実行する。
+  Rationale: Next.js に依存しない軽量ランナーで高速にテストを回せ、React コンポーネントの振る舞い検証を開発初期から積み上げやすいため。Jest を避けて依存を減らしつつ、jsdom で DOM マッチャーを利用できる。
+  Date/Author: 2026-01-12 / Codex
+- Decision: GTFS 前処理 CLI は TypeScript のまま `tsx` で実行し、`pnpm gtfs:sync` で最新フィード取得・GeoJSON 保存・`minotor` のバイナリ生成まで一気通貫で行う。生成物は `public/gtfs/`、ダウンロードキャッシュは `data/gtfs/` に置き、gitignore する。
+  Rationale: ESM/TS のまま高速に実行でき、依存追加が最小限。ブラウザから直接参照するデータのみ `public/gtfs` にまとまるため UI 実装とテストが簡単。
+  Date/Author: 2026-01-12 / Codex
+- Decision: GTFS メタデータの `file_published_at` で最新フィードを選び、`file_from_date`/`file_to_date` でサービス日をクランプして minotor に渡す。
+  Rationale: 配信期間外の日付で解析すると無効サービスになるリスクを避け、常に利用可能な日付でバイナリ生成を保証するため。
+  Date/Author: 2026-01-12 / Codex
+- Decision: Leaflet を使う地図コンポーネントは Next.js で SSR させず、`dynamic(..., { ssr: false })` でクライアント側のみ読み込む。
+  Rationale: Leaflet が `window` を参照するためプリレンダーで落ちる。動作時はブラウザ限定で問題ないため SSR を無効化した。
+  Date/Author: 2026-01-12 / Codex
+- Decision: `planTrip` のテストでは `public/gtfs/` のバイナリを `fetch` スタブで返し、ネットワーク不要で経路探索を検証する。
+  Rationale: 実データに基づくルーティングをテストしつつ、CI/ローカルで安定させるため。`resetGtfsCaches` と組み合わせてキャッシュ汚染も防ぐ。
+  Date/Author: 2026-01-12 / Codex
+- Decision: ルート名が欠損している場合は `Route ${type}` 形式のフォールバックを表示に使う。
+  Rationale: 旅程 UI に空欄が出るのを防ぎ、利用路線のハイライト色決定にも安定したキーを提供するため。
+  Date/Author: 2026-01-12 / Codex
 
 ## Outcomes & Retrospective
 
-まだ実装は開始していない。devcontainer と本 ExecPlan のみ追加済み。
+Next.js 16 + TypeScript + Tailwind v4 の雛形と、Vitest + React Testing Library のテスト基盤を追加し、`pnpm lint` / `pnpm test` / `pnpm build` が通る状態になった。トップページにはマイルストーンのロードマップを示すプレースホルダー UI を置き、次に着手すべき機能を示した。加えて、`pnpm gtfs:sync` で GTFS-JP を取得→routes/stops GeoJSON を保存→minotor 用 bin を生成できる CLI を実装し、実データでバイナリ出力を確認した（サービス日をメタデータ期間内でクランプ）。
+React Leaflet を用いた地図 UI を追加し、路線色分け・停留所マーカー・選択モード切り替え（出発/経由/目的）・経路ハイライトを実装した。minotor をブラウザ側で復元して `planTrip` から旅程モデルを返す処理を組み込み、経由地滞在を考慮した検索と旅程テキスト表示を提供する。`routeNameToColorHex` と `planTrip` の単体テストを追加し、実データ（public/gtfs）を fetch スタブで読み込む統合テストも含めて `pnpm lint` / `pnpm test` / `pnpm build` は全て成功している。
 
 ## Context and Orientation
 
-このリポジトリは現時点で最小構成であり、アプリ本体（Next.js）やテスト基盤はまだ存在しない。重要な既存ファイルは `.agent/PLANS.md`（ExecPlan の書式・要件）で、この ExecPlan はそのルールに従って維持される。
+リポジトリには Next.js 16 + TypeScript + Tailwind v4 の雛形が配置されており、Vitest + React Testing Library のテスト基盤も整っている。GTFS 前処理用に `scripts/gtfs-sync.ts`（TypeScript + tsx 実行）を追加し、`pnpm gtfs:sync` で GTFS-JP ZIP を `data/gtfs/` にキャッシュしつつ `public/gtfs/` に GeoJSON と minotor 用バイナリを出力できる。重要な既存ファイルは `.agent/PLANS.md`（ExecPlan の書式・要件）、トップページのプレースホルダー UI（`src/app/page.tsx`）、テストセットアップ（`vitest.config.ts`, `src/test/setup.ts`）、共通コンポーネント（`src/components/FeatureCard.tsx`）、GTFS リポジトリクライアント（`src/lib/gtfsDataRepository.ts`）で、この ExecPlan は `.agent/PLANS.md` に従って維持される。
 
 本プロジェクトで扱う重要語の定義は以下の通り。
 
@@ -66,7 +99,7 @@ SourceStopId: `minotor` がクエリ指定に使う「データソース上の�
 
 ## Plan of Work
 
-最初に、devcontainer 上で Next.js + TypeScript のプロジェクト雛形を作成し、lint/test/build が回る最小状態を作る。ここで「SPA としての UI 実装」を進めやすいよう、App Router を使い、地図と入力フォームを Client Component として設計する（地図ライブラリはブラウザ専用のため）。
+最初に、devcontainer 上で Next.js + TypeScript のプロジェクト雛形を作成し、lint/test/build が回る最小状態を作る（このステップは完了済み。再現手順は Concrete Steps に記載）。ここで「SPA としての UI 実装」を進めやすいよう、App Router を使い、地図と入力フォームを Client Component として設計する（地図ライブラリはブラウザ専用のため）。
 
 次に、GTFSデータリポジトリ API から「知立市ミニバス」の最新 GTFS ZIP と GeoJSON を取得し、アプリで利用しやすい形に前処理する。前処理は Node.js で行い、成果物は `public/gtfs/` 配下に配置してブラウザから取得できるようにする。具体的には `minotor` の `GtfsParser` を使い、指定日の `Timetable` と `StopsIndex` を生成し、`serialize()` したバイナリ（`timetable.bin`, `stops.bin`）を出力する。地図表示用には `stops.geojson` と `routes.geojson` をそのまま保存し、必要に応じてアプリ内でキャッシュ/整形する。
 
@@ -82,30 +115,35 @@ SourceStopId: `minotor` がクエリ指定に使う「データソース上の�
 
     VS Code の Dev Containers 機能で「Reopen in Container」を実行する。起動後、コンテナ内で `echo $CODEX_HOME` を実行し、`${containerWorkspaceFolder}/.codex` が表示されることを確認する。
 
-2) Next.js（TypeScript）プロジェクトを作成する。
+2) Next.js（TypeScript）プロジェクトを雛形として作成し、lint/test/build が通る状態にする（完了済みの再現手順）。
 
-    例（パッケージマネージャは `pnpm` を推奨、無い場合は `npm` でも良い）:
+    ルートが空でないため、一度テンポラリに生成してから同期する。
 
-        corepack enable
-        pnpm dlx create-next-app@latest . --ts --eslint --app --src-dir --tailwind --no-import-alias
+        pnpm dlx create-next-app@latest tmp-next --ts --eslint --app --src-dir --tailwind --no-import-alias --use-pnpm --yes
+        rsync -a tmp-next/ .
+        rm -rf tmp-next
+        pnpm install
 
-    ここで生成された `package.json` に対して、`pnpm lint` / `pnpm test` / `pnpm build` が最終的に通るように整備する（テストコマンドは後続ステップで導入）。
+    追加調整: `package.json` を `"type": "module"` にし、`lint`/`test`/`typecheck` スクリプトを定義。Vitest + React Testing Library + jest-dom + jsdom を `vitest.config.ts` と `src/test/setup.ts` でセットアップし、`src/components/FeatureCard.test.tsx` をサンプルテストとして追加した。README はプロジェクトの起動方法に更新済み。
 
-3) GTFS 取得・前処理スクリプトを追加する。
+    完了確認として以下を実行する（全て成功することを確認済み）。
 
-    `api.gtfs-data.jp` から `org_id=chiryucity` の最新 `file_url` と `file_uid` を取得し、その ZIP と GeoJSON をダウンロードするスクリプトを作る。次に `minotor/parser` の `GtfsParser` で `StopsIndex` と `Timetable` を作成し、`public/gtfs/` に `stops.bin` と `timetable.bin` を出力する。
+        pnpm lint
+        pnpm test
+        pnpm build
 
-    想定コマンド:
+3) GTFS 取得・前処理スクリプトを追加する（実装済み）。
+
+    `scripts/gtfs-sync.ts` を `pnpm gtfs:sync` で実行し、`api.gtfs-data.jp` から `org_id=chiryucity` のメタデータを取得→`file_published_at` の最新を選択→`file_from_date`/`file_to_date` でサービス日をクランプ→ZIP/GeoJSON をダウンロード→`minotor` の `GtfsParser` で `StopsIndex` と `Timetable` を生成する。成果物は `public/gtfs/` に `stops.bin` / `timetable.bin` / `stops.geojson` / `routes.geojson` / `metadata.json` として出力し、ZIP は `data/gtfs/` にキャッシュする（いずれも gitignore）。
+
+    例:
 
         pnpm gtfs:sync
-
-    期待する短い出力例:
-
-        Fetching GTFS metadata for org_id=chiryucity...
-        Downloading feed.zip (uid=...)...
-        Writing public/gtfs/stops.geojson, routes.geojson...
-        Parsing GTFS for date 2026-01-12...
-        Writing public/gtfs/stops.bin, timetable.bin...
+        Using service date 2026-01-12 (today; valid 2025-12-23..2026-12-31)
+        Saved feed.zip -> data/gtfs/feed-<uid>.zip
+        Saved stops.geojson -> public/gtfs/stops.geojson
+        Saved routes.geojson -> public/gtfs/routes.geojson
+        Wrote timetable.bin and stops.bin for 2026-01-12 to public/gtfs
         Done.
 
 4) 地図表示（路線色分け）と地点指定 UI を実装する。
@@ -231,3 +269,7 @@ Next.js の生成物（`.next/`）やテスト成果物は常に再生成可能�
     export async function planTrip(input: PlanTripInput): Promise<Itinerary>;
 
 この設計により、UI（React）と探索ロジック（planner）を分離し、ユニットテストで探索を検証しやすくする。
+
+Update note (2026-01-12 07:03Z): Next.js 雛形とテスト基盤を構築し、Progress/Concrete Steps/Decision Log/Outcomes を更新した。
+Update note (2026-01-12 07:14Z): GTFS 取得・前処理スクリプトを実装し、`pnpm gtfs:sync` で実データから GeoJSON/bin を生成できることを確認、各セクションを更新した。
+Update note (2026-01-12 07:40Z): 地図 UI・旅程計算・テストを実装し、Leaflet の SSR 回避やルート名フォールバックを含む設計を確定、Progress/Surprises/Decision/Outcomes を更新した。
