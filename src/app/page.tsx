@@ -14,8 +14,10 @@ import {
   type StopsGeoJson,
 } from "@/lib/gtfsLocalClient";
 import { planTrip } from "@/lib/planner/planTrip";
+import { selectStopByConnectivity } from "@/lib/planner/selectStopCandidate";
 import type { Itinerary } from "@/lib/planner/itinerary";
 import { routeNameToColorHex } from "@/lib/routeColors";
+import type { SelectionMode } from "@/lib/planner/selectionTypes";
 
 const TransitMap = dynamic(
   () => import("@/components/TransitMap").then((mod) => mod.TransitMap),
@@ -23,8 +25,6 @@ const TransitMap = dynamic(
     ssr: false,
   },
 );
-
-type SelectionMode = "from" | "via" | "to";
 
 const defaultDeparture = "08:00";
 
@@ -146,6 +146,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isPlanning, setIsPlanning] = useState(false);
+  const [isSelectingStop, setIsSelectingStop] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,11 +238,31 @@ export default function Home() {
     }
   };
 
-  const handleMapPick = (lat: number, lon: number) => {
+  const handleMapPick = async (lat: number, lon: number) => {
     if (!stopsIndex) return;
-    const nearest = stopsIndex.findStopsByLocation(lat, lon, 1, 0.6)[0];
-    if (nearest) {
-      applySelection(nearest);
+    setIsSelectingStop(true);
+    try {
+      const selected = await selectStopByConnectivity({
+        lat,
+        lon,
+        stopsIndex,
+        selectionMode,
+        fromStopId: fromStop?.sourceStopId,
+        toStopId: toStop?.sourceStopId,
+        departAtHHmm: departureTime,
+        viaStayMinutes,
+        maxTransfers,
+      });
+      if (selected) {
+        applySelection(selected);
+      }
+    } catch (err) {
+      console.error(err);
+      setError(
+        "停留所の選定中にエラーが発生しました。別の地点を選択してください。",
+      );
+    } finally {
+      setIsSelectingStop(false);
     }
   };
 
@@ -444,6 +465,11 @@ export default function Home() {
               {!dataReady ? (
                 <div className="text-xs text-slate-500">
                   GTFS データを読み込んでいます...
+                </div>
+              ) : null}
+              {isSelectingStop ? (
+                <div className="text-xs text-slate-500">
+                  停留所候補を評価しています...
                 </div>
               ) : null}
               {error ? (
