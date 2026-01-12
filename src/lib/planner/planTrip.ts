@@ -1,6 +1,11 @@
-import { Duration, Query, Route as MinotorRoute, Router, Time } from "minotor";
-import { loadStopsIndex, loadTimetable } from "../gtfsLocalClient";
+import { Duration, Route as MinotorRoute, Time } from "minotor";
 import type { Itinerary, ItineraryLeg } from "./itinerary";
+import {
+  DEFAULT_MIN_TRANSFER_MINUTES,
+  buildQuery,
+  loadRouter,
+  parseHHmm,
+} from "./routingUtils";
 
 export type PlanTripInput = {
   fromStopId: string;
@@ -11,25 +16,12 @@ export type PlanTripInput = {
   maxTransfers: number;
 };
 
-const DEFAULT_MIN_TRANSFER_MINUTES = 2;
-
 const formatHHmm = (time: Time): string => {
   const minutes = time.toMinutes();
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}`;
 };
-
-function parseHHmm(value: string): Time {
-  if (!/^\d{1,2}:\d{2}$/.test(value)) {
-    throw new Error("時刻は HH:mm 形式で入力してください");
-  }
-  const [hh, mm] = value.split(":").map(Number);
-  if (Number.isNaN(hh) || Number.isNaN(mm) || mm < 0 || mm > 59) {
-    throw new Error("時刻は HH:mm 形式で入力してください");
-  }
-  return Time.fromHM(hh, mm);
-}
 
 const stopName = (sourceStopId: string, fallback: MinotorRoute["legs"][number]["from"]) =>
   fallback?.name ?? sourceStopId;
@@ -80,32 +72,8 @@ function legsToItinerary(route: MinotorRoute): Itinerary {
   };
 }
 
-function buildQuery(params: {
-  from: string;
-  to: string;
-  departure: Time;
-  maxTransfers: number;
-  minTransferMinutes: number;
-}) {
-  const builder = new Query.Builder()
-    .from(params.from)
-    .to(params.to)
-    .departureTime(params.departure)
-    .maxTransfers(params.maxTransfers)
-    .minTransferTime(Duration.fromMinutes(params.minTransferMinutes));
-  return builder.build();
-}
-
-async function fetchRouter() {
-  const [timetable, stopsIndex] = await Promise.all([
-    loadTimetable(),
-    loadStopsIndex(),
-  ]);
-  return new Router(timetable, stopsIndex);
-}
-
 export async function planTrip(input: PlanTripInput): Promise<Itinerary> {
-  const router = await fetchRouter();
+  const router = await loadRouter();
 
   const minTransferMinutes = DEFAULT_MIN_TRANSFER_MINUTES;
   const departureTime = parseHHmm(input.departAtHHmm);
