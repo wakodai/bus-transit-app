@@ -21,6 +21,11 @@ type TransitMapProps = {
   selectionMode: "from" | "via" | "to";
   selectedStopIds: string[];
   usedRouteNames: string[];
+  highlightSegments?: Array<{
+    routeName: string;
+    from: { lat: number; lon: number };
+    to: { lat: number; lon: number };
+  }>;
   onMapClick: (lat: number, lng: number) => void;
   onStopClick: (stopId: string) => void;
 };
@@ -42,9 +47,64 @@ export function TransitMap({
   selectionMode,
   selectedStopIds,
   usedRouteNames,
+  highlightSegments,
   onMapClick,
   onStopClick,
 }: TransitMapProps) {
+  const routePaths = useMemo(() => {
+    if (!routesGeoJson) return new Map<string, LatLngExpression[]>();
+    const map = new Map<string, LatLngExpression[]>();
+    routesGeoJson.features.forEach((feature) => {
+      const coords =
+        feature.geometry.type === "MultiLineString"
+          ? feature.geometry.coordinates.flat().map(
+              ([lon, lat]) => [lat, lon] as LatLngExpression,
+            )
+          : [];
+      map.set(feature.properties.route_name, coords);
+    });
+    return map;
+  }, [routesGeoJson]);
+
+  const findNearestIndex = (
+    points: LatLngExpression[],
+    target: { lat: number; lon: number },
+  ) => {
+    let bestIdx = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    points.forEach((pt, idx) => {
+      const [lat, lon] = pt as [number, number];
+      const d =
+        (lat - target.lat) * (lat - target.lat) +
+        (lon - target.lon) * (lon - target.lon);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = idx;
+      }
+    });
+    return bestIdx;
+  };
+
+  const clipPath = (
+    points: LatLngExpression[],
+    from: { lat: number; lon: number },
+    to: { lat: number; lon: number },
+  ) => {
+    if (points.length < 2) return [];
+    const startIdx = findNearestIndex(points, from);
+    const endIdx = findNearestIndex(points, to);
+    if (startIdx === endIdx) {
+      return [
+        [from.lat, from.lon] as LatLngExpression,
+        [to.lat, to.lon] as LatLngExpression,
+      ];
+    }
+    if (startIdx < endIdx) {
+      return points.slice(startIdx, endIdx + 1);
+    }
+    return points.slice(endIdx, startIdx + 1).reverse();
+  };
+
   const routes = useMemo(() => {
     if (!routesGeoJson) return [];
     return routesGeoJson.features.map((feature) => {
@@ -138,7 +198,7 @@ export function TransitMap({
                 key={`${route.routeName}-${idx}-base`}
                 positions={segment}
                 color={route.color}
-                opacity={1}
+                opacity={0.7}
                 weight={3}
                 lineCap="round"
                 lineJoin="round"
@@ -146,6 +206,32 @@ export function TransitMap({
             );
           }),
         )}
+        {highlightSegments
+          ?.map((seg, idx) => {
+            const path = routePaths.get(seg.routeName);
+            const positions =
+              path && path.length > 1
+                ? clipPath(path, seg.from, seg.to)
+                : [
+                    [seg.from.lat, seg.from.lon] as LatLngExpression,
+                    [seg.to.lat, seg.to.lon] as LatLngExpression,
+                  ];
+            const color = routePaths.has(seg.routeName)
+              ? routeNameToColorHex(seg.routeName)
+              : "#ef4444";
+            return (
+              <Polyline
+                key={`highlight-${idx}`}
+                positions={positions}
+                color={color}
+                opacity={0.9}
+                weight={7}
+                lineCap="round"
+                lineJoin="round"
+              />
+            );
+          })
+          .filter(Boolean)}
         {stops.map((stop) => {
           const selected = selectedIds.has(stop.id);
           return (

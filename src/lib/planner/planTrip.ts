@@ -46,7 +46,13 @@ function legsToItinerary(route: MinotorRoute): Itinerary {
         kind: "vehicle",
         routeName,
         fromStopName: leg.from.name,
+        fromStopId: leg.from.sourceStopId,
+        fromLat: leg.from.lat,
+        fromLon: leg.from.lon,
         toStopName: leg.to.name,
+        toStopId: leg.to.sourceStopId,
+        toLat: leg.to.lat,
+        toLon: leg.to.lon,
         departureTimeHHmm: formatHHmm(leg.departureTime),
         arrivalTimeHHmm: formatHHmm(leg.arrivalTime),
       };
@@ -57,7 +63,13 @@ function legsToItinerary(route: MinotorRoute): Itinerary {
     return {
       kind: "transfer",
       fromStopName: leg.from.name,
+      fromStopId: leg.from.sourceStopId,
+      fromLat: leg.from.lat,
+      fromLon: leg.from.lon,
       toStopName: leg.to.name,
+      toStopId: leg.to.sourceStopId,
+      toLat: leg.to.lat,
+      toLon: leg.to.lon,
       minTransferMinutes: minutes,
     };
   });

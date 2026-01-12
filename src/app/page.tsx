@@ -195,6 +195,34 @@ export default function Home() {
     [fromStop, viaStop, toStop],
   );
 
+  const highlightSegments = useMemo(() => {
+    if (!itinerary) return [];
+    return itinerary.legs
+      .filter((leg) => leg.kind === "vehicle")
+      .map((leg) => ({
+        routeName: leg.routeName,
+        from: {
+          lat: leg.fromLat,
+          lon: leg.fromLon,
+        },
+        to: {
+          lat: leg.toLat,
+          lon: leg.toLon,
+        },
+      }))
+      .filter(
+        (seg) =>
+          typeof seg.from.lat === "number" &&
+          typeof seg.from.lon === "number" &&
+          typeof seg.to.lat === "number" &&
+          typeof seg.to.lon === "number",
+      ) as Array<{
+        routeName: string;
+        from: { lat: number; lon: number };
+        to: { lat: number; lon: number };
+      }>;
+  }, [itinerary]);
+
   const applySelection = (stop: Stop, target?: SelectionMode) => {
     const mode = target ?? selectionMode;
     setError(null);
@@ -313,6 +341,7 @@ export default function Home() {
               selectionMode={selectionMode}
               selectedStopIds={selectedStopIds}
               usedRouteNames={usedRouteNames}
+              highlightSegments={highlightSegments}
               onMapClick={handleMapPick}
               onStopClick={handleStopClick}
             />
